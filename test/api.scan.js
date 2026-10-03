@@ -375,6 +375,92 @@ describe('picomatch', () => {
       assertParts('foo/[0-9]/[0-9]', ['foo', '[0-9]', '[0-9]']);
       assertParts('foo[0-9]/bar[0-9]', ['foo[0-9]', 'bar[0-9]']);
     });
+
+    it('should return a single part when the pattern has no separators', () => {
+      assertParts('', ['']);
+      assertParts('*', ['*']);
+      assertParts('.*', ['.*']);
+      assertParts('**', ['**']);
+      assertParts('***', ['***']);
+      assertParts('?', ['?']);
+      assertParts('foo', ['foo']);
+      assertParts('!foo', ['foo']);
+      assertParts('foo*', ['foo*']);
+      assertParts('*.js', ['*.js']);
+      assertParts('{1..9}', ['{1..9}']);
+      assertParts('c!(.)z', ['c!(.)z']);
+      assertParts('!(foo)*', ['!(foo)*']);
+      assertParts('?(a)', ['?(a)']);
+      assertParts('@(a|b).md', ['@(a|b).md']);
+      assertParts('(b|a).(a)', ['(b|a).(a)']);
+      assertParts('+(a|b\\[)*', ['+(a|b\\[)*']);
+    });
+
+    it('should not split on slashes inside parens, brackets, braces, or escapes', () => {
+      // Slashes inside parentheses are part of the pattern, not separators
+      assertParts('(a/b)', ['(a/b)']);
+      assertParts('(a\\b)', ['(a\\b)']);
+      assertParts('!(!(bar)/baz)', ['!(!(bar)/baz)']);
+
+      // Slashes inside brackets are part of a character class
+      assertParts('foo[/]bar', ['foo[/]bar']);
+      assertParts('foo\\[a\\/]', ['foo\\[a\\/]']);
+
+      // Only unescaped, non-enclosed slashes split the pattern
+      assertParts('/dev\\/@(tcp|udp)\\/*\\/*', ['', 'dev\\/@(tcp|udp)\\/*\\/*']);
+    });
+
+    it('should keep root and trailing empty segments', () => {
+      assertParts('/', ['', '']);
+      assertParts('/*', ['', '*']);
+      assertParts('/x', ['', 'x']);
+      assertParts('*/', ['*', '']);
+      assertParts('a/b/.git/', ['a', 'b', '.git', '']);
+    });
+
+    it('should return identical parts with parts, tokens, or both', () => {
+      const patterns = [
+        '', '*', '**', 'foo', '!foo', 'foo*', '{1..9}', 'c!(.)z',
+        '(a/b)', 'foo\\[a\\/]', '/', '/*', '*/', './',
+        'foo/bar/*.js', 'a/**/b', './foo/@(bar)/**/*.js',
+        '!foo/bar/*.js', '**/*(W*, *)*', 'foo[/]bar',
+        '/dev\\/@(tcp|udp)\\/*\\/*', '!(!(bar)/baz)',
+        'foo/(bar|baz)/*.js', 'a/**@(/x|/z)/*.md'
+      ];
+
+      for (const pattern of patterns) {
+        const withParts = scan(pattern, { parts: true }).parts;
+        const withTokens = scan(pattern, { tokens: true }).parts;
+        const withBoth = scan(pattern, { parts: true, tokens: true }).parts;
+
+        assert.deepStrictEqual(withTokens, withParts);
+        assert.deepStrictEqual(withBoth, withParts);
+      }
+    });
+
+    it('should align tokens with parts when tokens are enabled', () => {
+      const globInfo = scan('*', { tokens: true });
+      assert.deepStrictEqual(globInfo.parts, ['*']);
+      assert.strictEqual(globInfo.maxDepth, 1);
+      assert.deepStrictEqual(globInfo.tokens.map(t => t.value), ['*']);
+
+      const globstarInfo = scan('**', { tokens: true });
+      assert.deepStrictEqual(globstarInfo.parts, ['**']);
+      assert.strictEqual(globstarInfo.maxDepth, Infinity);
+      assert.strictEqual(globstarInfo.tokens[0].isGlobstar, true);
+
+      const negatedInfo = scan('!foo', { tokens: true });
+      assert.deepStrictEqual(negatedInfo.parts, ['foo']);
+      assert.strictEqual(negatedInfo.tokens.length, 1);
+      assert.strictEqual(negatedInfo.tokens[0].value, 'foo');
+      assert.strictEqual(negatedInfo.tokens[0].negated, true);
+
+      const multiInfo = scan('./foo/@(bar)/**/*.js', { tokens: true });
+      assert.deepStrictEqual(multiInfo.parts, ['foo', '@(bar)', '**', '*.js']);
+      assert.strictEqual(multiInfo.maxDepth, Infinity);
+      assert.strictEqual(multiInfo.tokens[0].isPrefix, true);
+      assert.deepStrictEqual(multiInfo.tokens.map(t => t.value), ['./', 'foo', '@(bar)', '**', '*.js']);
+    });
   });
 
   describe('.base (glob2base test patterns)', () => {
